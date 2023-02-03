@@ -29,7 +29,7 @@ This template will create a secrets vault in AWS Secrets Manager, store the keys
 The second cloudformation template to run is `vpncfnstack.yaml`. This builds out the VPN server, installs and configures WireGuard on it, sets up the DNS name and the security groups to only allow network ingress from the home network IP over the SSH and Wireguard ports. It has the following parameters that need entering. If any of the default values in the initialisation stack were changed, then the updated values will need entering here.
 * `AMIParameter` - The default AMI is for AWS Linux in US-EAST-2. You will need to change this if you are building elsewhere.
 * `DNSNameParameter` - The subdomain to set up for the DNS. You can leave the default of 'dns'
-* `DomainParameter` - The domain that you already have set up in AWS Route 53. For example, if you own example.com and have this set up in Route 53, and you leave the default parameter above, then your VPN will be available on vpn.example.com
+* `DomainParameter` - The domain that you already have set up in AWS Route 53. For example, if you own example.com and have this set up in Route 53, and you leave the default `DNSNameParameter`, then your VPN will be available on `vpn.example.com
 * `HomeIpParameter` - The static IP address of your home network
 * `IAMInstanceParameter` - This relates to the EC2IamRoleNameParameter parameter in the initialisation template.
 * `InstanceTypeParameter` - The EC2 instance type to use. Defaults to t4g.nano, the cheapest of the instances
