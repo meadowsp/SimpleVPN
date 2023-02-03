@@ -6,7 +6,7 @@ Simple VPN creates a small proof of concept VPN hosted in AWS based on WireGuard
 
 The architecture is defined to be as efficient (cheap :-) ) as possible. The server is running AWS Linux on an [AWS Graviton](https://en.wikipedia.org/wiki/AWS_Graviton) 64 bit ARM processor, using the smallest instance size, a [t4g.nano](https://aws.amazon.com/ec2/instance-types/t4/). This is deployed into Ohio (US-EAST-2).
 
-The architecture defined in the templates is for one VPN server, with 2 clients behind a NAT'd home static IP address. When the VPN is enabled the server will have the IP address of 10.0.0.1, the first client (peer 1) will have the IP address of 10.0.0.2 and the second client will be running on 10.0.0.3.
+The architecture defined in the templates is for one VPN server, with can support 2 clients behind a NAT'd home static IP address. When the VPN is enabled the server will have the IP address of 10.0.0.1, the first client (peer 1) will have the IP address of 10.0.0.2 and the second client will be running on 10.0.0.3.
 
 ### Prerequisites
 * A domain name managed in AWS Route53. This is to define the VPN endpoint
