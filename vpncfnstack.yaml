@@ -1,0 +1,129 @@
+Parameters:
+  HomeIpParameter:
+    Description: Home IP Address
+    Type: String
+  VPNPortParameter:
+    Description: VPN Port
+    Type: Number
+    Default: 51820
+  KeyNameParameter:
+    Description: SSH Key Pair Name
+    Type: String
+  IAMInstanceParameter:
+    Description: IAM Role for EC2 instance (to be able to read secrets)
+    Type: String
+    Default: EC2VPNSecretsRead
+  DomainParameter:
+    Description: Domain for the DNS endpoint
+    Type: String
+  DNSNameParameter:
+    Description: The subdomain for the DNS endpoint
+    Type: String
+    Default: vpn
+  InstanceTypeParameter:
+    Description: The EC2 instance type to use
+    Type: String
+    Default: t4g.nano
+  AMIParameter:
+    Description: The AMI to use
+    Type: String
+    Default: ami-0652d397074720eb1
+  SecretsParameter:
+    Description: The Secrets name
+    Type: String
+    Default: simpleVpnSecrets
+
+Resources:
+  Instance:
+    Type: 'AWS::EC2::Instance'
+    Metadata:
+      "AWS::CloudFormation::Init":
+        config:
+          files:
+            "/etc/wireguard/wg0.conf":
+              content: !Sub |
+                [Interface]
+                PrivateKey = VPNServerPrivateKey
+                Address = 10.0.0.1/24
+                PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+                PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+                ListenPort = ${VPNPortParameter}
+
+                [Peer]
+                PublicKey = VPNPeer1PublicKey
+                AllowedIPs = 10.0.0.2/32
+
+                [Peer]
+                PublicKey = VPNPeer2PublicKey
+                AllowedIPs = 10.0.0.3/32                
+              mode: "000600"
+              owner: root
+              group: root
+    Properties:
+      SecurityGroups:
+        - !Ref VpnSecurityGroup
+      KeyName: !Ref KeyNameParameter
+      InstanceType: !Ref InstanceTypeParameter
+      ImageId: !Ref AMIParameter
+      IamInstanceProfile: !Ref IAMInstanceParameter
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            yum upgrade
+            amazon-linux-extras install -y epel
+            # Install the wireguard repo
+            export rwfile="/etc/yum.repos.d/wireguard.repo"
+            export rwurl="https://copr.fedorainfracloud.org/coprs/jdoss/wireguard/repo/epel-8/jdoss-wireguard-epel-8.repo"
+            wget --output-document="$rwfile" "$rwurl"
+            yum clean all
+            # Install wireguard-dkms, the tools that we'll need to build wireguard-tools and the other utils that we'll use later
+            yum install -y wireguard-dkms gcc git make aws-cfn-bootstrap jq
+            # Build and install wireguard-tools from source (as there isn't an ARM64 package easily available)
+            git clone https://git.zx2c4.com/wireguard-tools
+            make -C wireguard-tools/src -j$(nproc)
+            make -C wireguard-tools/src install
+            # Create the wireguard config file template
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource Instance --region ${AWS::Region}
+            # Grab the keys from secrets manager and store them in temp files in /etc/wireguard (ensuring they aren't logged anywhere in this script or the cloud-init logs)
+            aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${SecretsParameter} --query SecretString --output text | jq -r .VPNServerPrivateKey | tee /etc/wireguard/serverprivate.txt > /dev/null 2>&1 
+            aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${SecretsParameter} --query SecretString --output text | jq -r .VPNPeer1PublicKey | tee /etc/wireguard/peer1public.txt > /dev/null 2>&1 
+            aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${SecretsParameter} --query SecretString --output text | jq -r .VPNPeer2PublicKey | tee /etc/wireguard/peer2public.txt > /dev/null 2>&1 
+            # Substitute the secrets into the wireguard config file
+            awk 'BEGIN{getline l < "/etc/wireguard/serverprivate.txt"}/VPNServerPrivateKey/{gsub("VPNServerPrivateKey",l)}1' /etc/wireguard/wg0.conf > /etc/wireguard/wg0.conf.1 
+            mv /etc/wireguard/wg0.conf.1 /etc/wireguard/wg0.conf
+            awk 'BEGIN{getline l < "/etc/wireguard/peer1public.txt"}/VPNPeer1PublicKey/{gsub("VPNPeer1PublicKey",l)}1' /etc/wireguard/wg0.conf > /etc/wireguard/wg0.conf.1 
+            mv /etc/wireguard/wg0.conf.1 /etc/wireguard/wg0.conf
+            awk 'BEGIN{getline l < "/etc/wireguard/peer2public.txt"}/VPNPeer2PublicKey/{gsub("VPNPeer2PublicKey",l)}1' /etc/wireguard/wg0.conf > /etc/wireguard/wg0.conf.1 
+            mv /etc/wireguard/wg0.conf.1 /etc/wireguard/wg0.conf
+            # Tidy up the temp files
+            rm -f /etc/wireguard/*txt
+            # Enable port forwarding
+            echo "net.ipv4.ip_forward = 1" | tee -a /etc/sysctl.conf
+            sysctl -p
+            # Turn wireguard on!
+            wg-quick up wg0
+
+  VpnSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: SSH and Wireguard in from the home ip
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Join [ "/", [ !Ref HomeIpParameter, "32" ] ]
+        - IpProtocol: udp
+          FromPort: !Ref VPNPortParameter
+          ToPort: !Ref VPNPortParameter
+          CidrIp: !Join [ "/", [ !Ref HomeIpParameter, "32" ] ]
+  DnsRecord:
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      HostedZoneName: !Join [ "", [ !Ref DomainParameter, "." ] ]
+      Comment: VPN end point
+      Name: !Join [ ".", [ !Ref DNSNameParameter, !Ref DomainParameter ] ]
+      Type: CNAME
+      TTL: '300'
+      ResourceRecords:
+        - !GetAtt Instance.PublicDnsName

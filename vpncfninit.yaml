@@ -1,0 +1,69 @@
+Parameters:
+  SecretsNameParameter:
+    Description: The Secrets name
+    Type: String
+    Default: simpleVpnSecrets
+  VPNServerPrivateKey:
+    Description: The server private key
+    Type: String
+    NoEcho: true
+  VPNServerPublicKey:
+    Description: The server public key
+    Type: String
+  VPNPeer1PublicKey:
+    Description: The public key for client one
+    Type: String
+  VPNPeer2PublicKey:
+    Description: The public key for client two
+    Type: String
+  SecretsPolicyNameParameter:
+    Description: The policy name to allow access to the secrets
+    Type: String
+    Default: VPNSecretReadAccess
+  EC2IamRoleNameParameter:
+    Description: The role which will be assigned to the EC2 instance to allow access to the secrets
+    Type: String
+    Default: EC2VPNSecretsRead
+
+Resources:
+  VPNSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Ref SecretsNameParameter
+      Description: VPN Keys
+      SecretString: !Join [ "", [ '{"VPNServerPrivateKey":"', !Ref VPNServerPrivateKey, '","VPNServerPublicKey":"', !Ref VPNServerPublicKey, '","VPNPeer1PublicKey":"', !Ref VPNPeer1PublicKey, '","VPNPeer2PublicKey":"', !Ref VPNPeer2PublicKey, '"}' ] ]
+  EC2IamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: Role to allow access to VPN Secrets
+      RoleName: !Ref EC2IamRoleNameParameter
+  SecretsPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Ref SecretsPolicyNameParameter
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'secretsmanager:GetSecretValue'
+            Resource: !Ref VPNSecret
+      Roles:
+        - !Ref EC2IamRole
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Ref EC2IamRoleNameParameter
+      Roles:
+        - !Ref EC2IamRole
+
+
